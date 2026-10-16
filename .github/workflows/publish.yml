@@ -1,0 +1,44 @@
+name: publish
+
+# Publishes to npm when a GitHub release is published (tag vX.Y.Z), using
+# npm trusted publishing: GitHub's OIDC identity instead of a stored token.
+# The package's npm settings trust exactly this repository and this file.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@^11.5.1
+
+      - name: Tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          src="$(sed -n "s/.*VERSION = '\(.*\)'.*/\1/p" src/version.ts)"
+          echo "tag=$tag package.json=$pkg src/version.ts=$src"
+          test "$tag" = "$pkg" && test "$pkg" = "$src"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # No token: npm exchanges the workflow's OIDC token, and attaches a
+      # provenance statement automatically.
+      - run: npm publish --access public

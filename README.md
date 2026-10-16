@@ -277,6 +277,13 @@ To move them, pass `prefix` (or set `OMNICONVA_ROUTE_PREFIX`) and change the **R
 - **Webhooks you send** carry `Authorization: Bearer <token>` and an HMAC of `"<t>.<body>"`.
 - **Keep the token and secret out of version control.** If one leaks, rotate it in OmniConva and update your environment.
 
+## Releasing (maintainers)
+
+1. Bump `version` in `package.json` and `VERSION` in `src/version.ts`, add a CHANGELOG entry, and commit.
+2. Create a GitHub release with the tag `vX.Y.Z`.
+
+The `publish` workflow then checks that the tag matches both versions, runs the tests, and publishes to npm through trusted publishing (GitHub's OIDC identity, with provenance), so no npm token is stored anywhere.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
