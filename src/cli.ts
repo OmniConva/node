@@ -12,8 +12,9 @@ import { createOmniConva } from './index';
 async function main() {
   await loadDotEnv();
   const args = process.argv.slice(2);
-  const urlArg = args.find((arg) => arg.startsWith('--url='))?.slice(6) ?? args[args.indexOf('--url') + 1];
-  const base = (args.includes('--url') || urlArg ? urlArg : undefined) ?? process.env.OMNICONVA_TEST_URL ?? 'http://localhost:3000/omniconva';
+  const urlIndex = args.indexOf('--url');
+  const urlArg = args.find((arg) => arg.startsWith('--url='))?.slice(6) ?? (urlIndex >= 0 ? args[urlIndex + 1] : undefined);
+  const base = urlArg ?? process.env.OMNICONVA_TEST_URL ?? 'http://localhost:3000/omniconva';
   const offline = args.includes('--offline');
   const secret = process.env.OMNICONVA_SIGNING_SECRET ?? '';
   let failed = false;

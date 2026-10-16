@@ -123,8 +123,10 @@ export interface OrderResult {
 export interface OrderHandler {
   /**
    * Creates the order in your store. Called once per order: a retry with the
-   * same Idempotency-Key is answered with the first result. Throw to refuse
-   * it; the message is shown to the store owner in OmniConva.
+   * same Idempotency-Key is answered with the first result. Throw an
+   * OrderRefusedError to refuse it: that message is shown to the store owner
+   * in OmniConva. Any other error is reported to OmniConva as a generic
+   * failure and passed to `onError` for your own logs.
    */
   create(order: Order): Promise<OrderResult> | OrderResult;
 }

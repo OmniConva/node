@@ -35,15 +35,15 @@ export function createOmniConva(options: OmniConvaOptions = {}): OmniConvaClient
   return new OmniConvaClient(options);
 }
 
-export { OmniConva, OmniConvaError } from './client';
+export { OmniConva, OmniConvaError, OrderRefusedError, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from './client';
 export type { IncomingCall, OmniConvaOptions, OutgoingResponse } from './client';
 export { fetchHandler } from './adapters/fetch';
-export { expressMiddleware, nodeHandler } from './adapters/node';
+export { expressMiddleware, nodeHandler, RequestAbortedError } from './adapters/node';
 export { parseOrder, toStandardProduct, OrderPayloadError } from './format';
 export { signRequest, signWebhook, verifyRequest, SIGNATURE_HEADER } from './signature';
 export { memoryIdempotencyStore } from './stores/memory';
 export { redisIdempotencyStore, type RedisLike } from './stores/redis';
-export type { IdempotencyClaim, IdempotencyStore } from './stores/types';
+export type { IdempotencyClaim, IdempotencyStore, IdempotencyStoreOptions } from './stores/types';
 export type {
   Order,
   OrderHandler,

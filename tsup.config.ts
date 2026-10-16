@@ -7,7 +7,6 @@ export default defineConfig([
     dts: true,
     clean: true,
     target: 'node18',
-    sourcemap: true,
   },
   {
     entry: { cli: 'src/cli.ts' },

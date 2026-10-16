@@ -1,4 +1,10 @@
-import { DONE_TTL_MS, STALE_CLAIM_MS, type IdempotencyClaim, type IdempotencyStore } from './types';
+import {
+  DONE_TTL_MS,
+  STALE_CLAIM_MS,
+  type IdempotencyClaim,
+  type IdempotencyStore,
+  type IdempotencyStoreOptions,
+} from './types';
 
 /**
  * The few Redis commands the store needs, in the shape both ioredis and
@@ -13,18 +19,31 @@ export interface RedisLike {
 }
 
 /** Shared store for several processes or servers. */
-export function redisIdempotencyStore(redis: RedisLike, prefix = 'omniconva:idempotency:'): IdempotencyStore {
+export function redisIdempotencyStore(
+  redis: RedisLike,
+  prefix = 'omniconva:idempotency:',
+  options: IdempotencyStoreOptions = {},
+): IdempotencyStore {
+  const staleClaimMs = options.staleClaimMs ?? STALE_CLAIM_MS;
+  // The pending key simply expires after staleClaimMs, which is what lets a
+  // retry take over a crashed request's claim.
+  async function claim(key: string, attempt = 0): Promise<IdempotencyClaim> {
+    const redisKey = prefix + key;
+    if (await redis.setIfAbsent(redisKey, JSON.stringify({ state: 'pending' }), staleClaimMs)) {
+      return { state: 'claimed' };
+    }
+    const stored = await redis.get(redisKey);
+    if (stored === null) {
+      // The key expired between the two commands. Once is a race; twice is a
+      // Redis that answers "not set" without keeping anything, so stop
+      // rather than loop.
+      return attempt === 0 ? claim(key, attempt + 1) : { state: 'busy' };
+    }
+    const entry = JSON.parse(stored) as { state: string; response?: Record<string, unknown> };
+    return entry.state === 'done' ? { state: 'done', response: entry.response ?? {} } : { state: 'busy' };
+  }
   return {
-    async claim(key): Promise<IdempotencyClaim> {
-      const redisKey = prefix + key;
-      if (await redis.setIfAbsent(redisKey, JSON.stringify({ state: 'pending' }), STALE_CLAIM_MS)) {
-        return { state: 'claimed' };
-      }
-      const stored = await redis.get(redisKey);
-      if (stored === null) return this.claim(key);
-      const entry = JSON.parse(stored) as { state: string; response?: Record<string, unknown> };
-      return entry.state === 'done' ? { state: 'done', response: entry.response ?? {} } : { state: 'busy' };
-    },
+    claim: (key) => claim(key),
     async complete(key, response) {
       await redis.set(prefix + key, JSON.stringify({ state: 'done', response }), DONE_TTL_MS);
     },

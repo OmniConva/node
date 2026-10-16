@@ -93,6 +93,35 @@ describe('requests from OmniConva', () => {
     expect(created).toHaveLength(1);
   });
 
+  // Only an OrderRefusedError's words reach OmniConva's logs; a crash in
+  // the handler (SQL, hosts, customer data in its message) does not.
+  it('keeps the details of a failed handler out of the response', async () => {
+    const errors: unknown[] = [];
+    const { client } = makeClient({ onError: (error) => errors.push(error) });
+    const failed = await call(client, signedRequest('/omniconva/orders', {
+      method: 'POST',
+      body: JSON.stringify(orderPayload({ customer: { name: 'Break Me', phone: '017' } })),
+    }));
+    expect(failed).toMatchObject({ status: 500, body: { message: 'The order could not be created' } });
+    expect(JSON.stringify(failed.body)).not.toContain('10.0.0.5');
+    expect(errors).toHaveLength(1);
+  });
+
+  it('refuses an oversized or unsigned body before reading it', async () => {
+    const { client } = makeClient({ maxBodyBytes: 1024 });
+    const big = JSON.stringify(orderPayload({ note: 'x'.repeat(2048) }));
+    expect((await call(client, signedRequest('/omniconva/orders', { method: 'POST', body: big }))).status).toBe(413);
+    const unsigned = new Request('http://shop.test/omniconva/orders', { method: 'POST', body: big });
+    expect((await call(client, unsigned)).status).toBe(401);
+    const small = JSON.stringify(orderPayload());
+    expect((await call(client, signedRequest('/omniconva/orders', { method: 'POST', body: small }))).status).toBe(201);
+  });
+
+  it('answers 404 for a product id that is not valid percent-encoding', async () => {
+    const { client } = makeClient();
+    expect((await call(client, signedRequest('/omniconva/products/%E0%A4%A'))).status).toBe(404);
+  });
+
   it('answers test orders without calling your handler, unless told to', async () => {
     const { client, created } = makeClient();
     const test = await call(client, signedRequest('/omniconva/orders', { method: 'POST', body: JSON.stringify(orderPayload({ test: true })) }));

@@ -109,7 +109,7 @@ function toOmniConva(product: ProductWithVariants) {
 
 **How orders behave:**
 - **Once per order.** `create()` runs once per order. If OmniConva retries after a timeout, the package answers with the first result.
-- **Refusing an order.** Throw an error to refuse an order. The message is shown to the store owner in OmniConva, and the order can be retried.
+- **Refusing an order.** Throw an `OrderRefusedError` (from `@omniconva/node`) to refuse an order: its message is shown to the store owner in OmniConva, and the order can be retried. Any other error is reported as a generic failure — its details go to `onError`, not to OmniConva.
 - **The id you return.** `orderId` is the reference the customer is told in chat, and the one `orderUpdated()` uses.
 - **Test orders.** Test orders from the OmniConva dashboard (`order.test`) are answered without calling `create()`. Pass `passTestOrders: true` to receive them.
 
@@ -158,8 +158,13 @@ Bun.serve({ fetch: (request) => omniconva.fetch(request) });          // Bun
 ```ts
 const handle = omniconva.node();
 http.createServer(async (req, res) => {
-  if (await handle(req, res)) return;   // answered an OmniConva route
-  // …your routes
+  try {
+    if (await handle(req, res)) return;   // answered an OmniConva route
+    // …your routes
+  } catch (error) {
+    res.statusCode = 500;
+    res.end();
+  }
 }).listen(3000);
 ```
 
@@ -267,13 +272,17 @@ To move them, pass `prefix` (or set `OMNICONVA_ROUTE_PREFIX`) and change the **R
 | `idempotency` | in memory |
 | `passTestOrders` | `false` |
 | `signatureTolerance` | `300` seconds |
+| `maxBodyBytes` | `1048576` (1 MB) — larger request bodies get `413` |
+| `allowInsecureUrls` | `false` — set (or `OMNICONVA_ALLOW_HTTP=1`) to accept `http://` on hosts other than localhost, e.g. a Docker service name |
 | `webhookTimeoutMs` / `webhookRetryDelaysMs` | `10000` / `[1000, 4000, 15000]` |
 | `widget` | `{ siteKey: OMNICONVA_SITE_KEY, apiUrl: OMNICONVA_API_URL, identitySecret: OMNICONVA_IDENTITY_SECRET }` |
 | `onError` | — (called with errors from your handlers) |
 
 ## How it's secured
 
-- **Requests from OmniConva** carry `X-OmniConva-Signature: t=<unix>,v1=<hex>`, an HMAC-SHA256 of `"<t>.<METHOD>.<path?query>.<body>"` made with your signing secret. Requests with a missing or wrong signature, or one older than 5 minutes, get `401`.
+- **Requests from OmniConva** carry `X-OmniConva-Signature: t=<unix>,v1=<hex>`, an HMAC-SHA256 of `"<t>.<METHOD>.<path?query>.<body>"` made with your signing secret. Requests with a missing or wrong signature, or one older than 5 minutes, get `401` — a missing or stale one before the body is even read. Bodies over 1 MB (`maxBodyBytes`) get `413`.
+- **Only refusals leave your server.** An `OrderRefusedError` message is relayed to OmniConva; every other error from your handlers is answered generically and handed to `onError`.
+- **Webhook and API URLs must be https** (http is accepted for localhost only), so the token and payloads never travel in clear.
 - **Webhooks you send** carry `Authorization: Bearer <token>` and an HMAC of `"<t>.<body>"`.
 - **Keep the token and secret out of version control.** If one leaks, rotate it in OmniConva and update your environment.
 
