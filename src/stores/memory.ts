@@ -1,4 +1,10 @@
-import { DONE_TTL_MS, STALE_CLAIM_MS, type IdempotencyClaim, type IdempotencyStore } from './types';
+import {
+  DONE_TTL_MS,
+  STALE_CLAIM_MS,
+  type IdempotencyClaim,
+  type IdempotencyStore,
+  type IdempotencyStoreOptions,
+} from './types';
 
 interface Entry {
   state: 'pending' | 'done';
@@ -7,7 +13,8 @@ interface Entry {
 }
 
 /** In-process store: fine for a single server process. */
-export function memoryIdempotencyStore(): IdempotencyStore {
+export function memoryIdempotencyStore(options: IdempotencyStoreOptions = {}): IdempotencyStore {
+  const staleClaimMs = options.staleClaimMs ?? STALE_CLAIM_MS;
   const entries = new Map<string, Entry>();
   const prune = () => {
     const cutoff = Date.now() - DONE_TTL_MS;
@@ -18,7 +25,7 @@ export function memoryIdempotencyStore(): IdempotencyStore {
       prune();
       const entry = entries.get(key);
       if (entry?.state === 'done') return { state: 'done', response: entry.response ?? {} };
-      if (entry && Date.now() - entry.at < STALE_CLAIM_MS) return { state: 'busy' };
+      if (entry && Date.now() - entry.at < staleClaimMs) return { state: 'busy' };
       entries.set(key, { state: 'pending', at: Date.now() });
       return { state: 'claimed' };
     },

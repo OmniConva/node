@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { OrderPayloadError, parseOrder, toStandardProduct } from './format';
-import { SIGNATURE_HEADER, signWebhook, verifyRequest } from './signature';
+import { SIGNATURE_HEADER, signWebhook, signatureLooksCurrent, verifyRequest } from './signature';
 import { memoryIdempotencyStore } from './stores/memory';
 import type { IdempotencyStore } from './stores/types';
 import type {
@@ -32,6 +32,12 @@ export interface OmniConvaOptions {
   passTestOrders?: boolean;
   /** Seconds a request signature may be from now. Default 300. */
   signatureTolerance?: number;
+  /**
+   * Largest request body accepted on your routes, in bytes. Default 1 MB —
+   * an order is a few KB. Larger posts are refused with 413 before being
+   * read, so an unauthenticated flood can't fill the process's memory.
+   */
+  maxBodyBytes?: number;
   /** Per webhook attempt. Default 10000. */
   webhookTimeoutMs?: number;
   /** Waits between webhook retries (network errors, 5xx, 429). Default [1000, 4000, 15000]. */
@@ -58,6 +64,32 @@ export interface OutgoingResponse {
   status: number;
   headers: Record<string, string>;
   body: string;
+}
+
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * Throw this from `orders.create()` to refuse an order. Its message is sent
+ * to OmniConva and shown to the store owner ("Out of delivery area"). Any
+ * other error is reported as a generic failure: a database error's text
+ * (SQL, table names, customer data) stays in your own logs, via `onError`.
+ */
+export class OrderRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrderRefusedError';
+  }
+}
+
+/** A request body over `maxBodyBytes`; the adapters turn it into a 413. */
+export class BodyTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Request body is larger than ${Math.round(maxBytes / 1024)} KB`);
+    this.name = 'BodyTooLargeError';
+  }
+  response(): OutgoingResponse {
+    return json(413, { message: this.message });
+  }
 }
 
 export class OmniConvaError extends Error {
@@ -98,6 +130,30 @@ export class OmniConva {
     this.prefix = '/' + (options.prefix ?? env('OMNICONVA_ROUTE_PREFIX') ?? 'omniconva').replace(/^\/+|\/+$/g, '');
     this.idempotency = options.idempotency ?? memoryIdempotencyStore();
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    if (this.webhookUrl) assertDeliveryUrl('OMNICONVA_WEBHOOK_URL', this.webhookUrl);
+  }
+
+  /** See OmniConvaOptions.maxBodyBytes. */
+  readonly maxBodyBytes: number;
+
+  /**
+   * What can be decided from the request line and headers alone, before
+   * the body is read: null when the path isn't under the prefix, a response
+   * to send straight away (no usable signature, body declared too large),
+   * or undefined when the adapter should read the body and call handleCall.
+   */
+  preflight(call: Omit<IncomingCall, 'body'>): OutgoingResponse | null | undefined {
+    const [pathname = ''] = call.pathAndQuery.split('?', 1);
+    if (pathname !== this.prefix && !pathname.startsWith(this.prefix + '/')) return null;
+    if (!signatureLooksCurrent(call.header(SIGNATURE_HEADER), { tolerance: this.options.signatureTolerance })) {
+      return json(401, {
+        message: 'Missing or invalid X-OmniConva-Signature. Check OMNICONVA_SIGNING_SECRET.',
+      });
+    }
+    const declared = Number(call.header('content-length') ?? 0);
+    if (declared > this.maxBodyBytes) return new BodyTooLargeError(this.maxBodyBytes).response();
+    return undefined;
   }
 
   /** Whether the webhook URL, token and signing secret are all set. */
@@ -136,11 +192,22 @@ export class OmniConva {
       if (method === 'GET' && route === '/health') return this.health();
       if (method === 'GET' && route === '/products') return await this.listProducts(new URLSearchParams(query));
       const one = /^\/products\/(.+)$/.exec(route);
-      if (method === 'GET' && one?.[1]) return await this.getProduct(decodeURIComponent(one[1]));
+      if (method === 'GET' && one?.[1]) {
+        let id: string;
+        try {
+          id = decodeURIComponent(one[1]);
+        } catch {
+          return json(404, { message: 'Not found' });
+        }
+        return await this.getProduct(id);
+      }
       if (method === 'POST' && route === '/orders') return await this.createOrder(call);
     } catch (error) {
+      // Your own code's errors stay in your own logs: OmniConva records the
+      // response text in its connection logs, where every dashboard user
+      // can read it.
       this.options.onError?.(error, { route });
-      return json(500, { message: error instanceof Error ? error.message : 'Internal error' });
+      return json(500, { message: 'Internal error' });
     }
     return json(404, { message: 'Not found' });
   }
@@ -219,9 +286,12 @@ export class OmniConva {
     } catch (error) {
       await this.idempotency.release(key);
       this.options.onError?.(error, { route: '/orders' });
-      return json(422, {
-        message: (error instanceof Error && error.message) || 'The order could not be created',
-      });
+      // A refusal is for the store owner's eyes; anything else (a database
+      // error with SQL and customer data in its message) is not.
+      if (error instanceof OrderRefusedError) {
+        return json(422, { message: error.message || 'The order was refused' });
+      }
+      return json(500, { message: 'The order could not be created' });
     }
     await this.idempotency.complete(key, response);
     return json(201, response);
@@ -340,6 +410,7 @@ export class OmniConva {
     const siteKey = this.options.widget?.siteKey ?? env('OMNICONVA_SITE_KEY');
     if (!siteKey) return '';
     const apiUrl = (this.options.widget?.apiUrl ?? env('OMNICONVA_API_URL') ?? 'https://api.omniconva.com').replace(/\/+$/, '');
+    assertDeliveryUrl('OMNICONVA_API_URL', apiUrl);
     const config: Record<string, unknown> = { siteKey, apiBase: apiUrl };
     if (options.showPoweredBy !== undefined) config.showPoweredBy = options.showPoweredBy;
     const customer = options.customer;
@@ -361,9 +432,28 @@ export class OmniConva {
     const serialized = JSON.stringify(config).replace(/</g, '\\u003c');
     return (
       `<script>window.OmniConvaChat=Object.assign(window.OmniConvaChat||{},${serialized});</script>` +
-      `<script src="${apiUrl}/static/widget.min.js" defer></script>`
+      `<script src="${escapeAttribute(apiUrl)}/static/widget.min.js" defer></script>`
     );
   }
+}
+
+// http:// is for your own machine only — on any other host the webhook
+// token and signed payloads would travel in clear.
+function assertDeliveryUrl(name: string, value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new OmniConvaError(`${name} is not a valid URL: ${value}`);
+  }
+  const local = /^(localhost|127\.0\.0\.1|\[::1\]|.+\.(localhost|test))$/i.test(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    throw new OmniConvaError(`${name} must start with https:// (http:// is allowed for localhost only)`);
+  }
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function errorMessage(response: Response): Promise<string> {

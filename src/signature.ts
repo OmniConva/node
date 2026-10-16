@@ -30,6 +30,22 @@ export function signRequest(
   return `t=${timestamp},v1=${hmac(secret, `${timestamp}.${method.toUpperCase()}.${pathAndQuery}.${body}`)}`;
 }
 
+/**
+ * Whether a signature header is well-formed and its timestamp is within
+ * tolerance — everything that can be checked before the body has been read.
+ * A request that fails this is refused without buffering its body.
+ */
+export function signatureLooksCurrent(
+  header: string | null | undefined,
+  options: { tolerance?: number; now?: number } = {},
+): boolean {
+  if (!header) return false;
+  const match = /(?:^|,)\s*t=(\d+)\s*(?:,|$)/.exec(header);
+  const v1 = /(?:^|,)\s*v1=([0-9a-f]+)\s*(?:,|$)/i.test(header);
+  if (!match || !v1) return false;
+  return Math.abs((options.now ?? now()) - Number(match[1])) <= (options.tolerance ?? DEFAULT_TOLERANCE_SECONDS);
+}
+
 export function verifyRequest(
   secret: string,
   header: string | null | undefined,

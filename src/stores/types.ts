@@ -18,6 +18,17 @@ export interface IdempotencyStore {
   release(key: string): Promise<void>;
 }
 
+export interface IdempotencyStoreOptions {
+  /**
+   * How long a claim may stay pending before a retry takes it over, in ms.
+   * Default 5 minutes. A crashed request leaves its claim behind, and this
+   * is what lets OmniConva's retry get through; but if your `create()` can
+   * legitimately run longer than this (a slow ERP, a payment hold), raise
+   * it — otherwise the retry creates the order a second time.
+   */
+  staleClaimMs?: number;
+}
+
 // A claim left pending this long (a crashed request) can be taken over.
 export const STALE_CLAIM_MS = 5 * 60 * 1000;
 // How long a finished order's answer is kept for retries.

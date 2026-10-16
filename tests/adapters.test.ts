@@ -78,6 +78,26 @@ describe('node:http', () => {
   });
 });
 
+describe('node:http prefix', () => {
+  // `/omniconva-newsletter` is the merchant's own route: the handler must
+  // neither answer it nor consume its body.
+  it('leaves a look-alike path, body and all, to your server', async () => {
+    const { client } = makeClient();
+    const handle = client.node();
+    let seen = '';
+    const base = await listen(async (req: IncomingMessage, res: ServerResponse) => {
+      if (await handle(req, res)) return;
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      seen = Buffer.concat(chunks).toString();
+      res.end('mine');
+    });
+    const response = await fetch(`${base}/omniconva-newsletter`, { method: 'POST', body: 'email=a@b.c' });
+    expect(await response.text()).toBe('mine');
+    expect(seen).toBe('email=a@b.c');
+  });
+});
+
 describe('Next.js', () => {
   it('exposes GET and POST route handlers', async () => {
     const { client } = makeClient();

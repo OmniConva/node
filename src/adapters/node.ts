@@ -1,11 +1,23 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { OmniConva, OutgoingResponse } from '../client';
+import { BodyTooLargeError, type OmniConva, type OutgoingResponse } from '../client';
 
-/** Reads the raw body of a Node request (once). */
-export function readBody(request: IncomingMessage): Promise<string> {
+/**
+ * Reads the raw body of a Node request (once), giving up as soon as it
+ * passes `maxBytes` so an oversized post is dropped instead of buffered.
+ */
+export function readBody(request: IncomingMessage, maxBytes = Infinity): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        request.destroy();
+        reject(new BodyTooLargeError(maxBytes));
+        return;
+      }
+      chunks.push(chunk);
+    });
     request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     request.on('error', reject);
   });
@@ -31,14 +43,29 @@ function headerOf(request: IncomingMessage) {
 export function nodeHandler(omniconva: OmniConva) {
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const pathAndQuery = request.url ?? '/';
-    if (!pathAndQuery.startsWith(omniconva.prefix)) return false;
-    const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await readBody(request);
-    const result = await omniconva.handleCall({
-      method: request.method ?? 'GET',
-      pathAndQuery,
-      body,
-      header: headerOf(request),
-    });
+    const method = request.method ?? 'GET';
+    const header = headerOf(request);
+    // Nothing is read off the socket until the path is ours and the request
+    // carries a signature worth checking.
+    const early = omniconva.preflight({ method, pathAndQuery, header });
+    if (early === null) return false;
+    if (early) {
+      writeResponse(response, early);
+      return true;
+    }
+    let body = '';
+    if (method !== 'GET' && method !== 'HEAD') {
+      try {
+        body = await readBody(request, omniconva.maxBodyBytes);
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) {
+          writeResponse(response, error.response());
+          return true;
+        }
+        throw error;
+      }
+    }
+    const result = await omniconva.handleCall({ method, pathAndQuery, body, header });
     if (!result) return false;
     writeResponse(response, result);
     return true;
@@ -66,15 +93,25 @@ export function expressMiddleware(omniconva: OmniConva) {
   ): Promise<void> => {
     try {
       const pathAndQuery = request.originalUrl ?? request.url ?? '/';
-      const [pathname = ''] = pathAndQuery.split('?', 1);
-      if (pathname !== omniconva.prefix && !pathname.startsWith(omniconva.prefix + '/')) {
+      const method = request.method ?? 'GET';
+      const header = headerOf(request);
+      const early = omniconva.preflight({ method, pathAndQuery, header });
+      if (early === null) {
         next();
         return;
       }
+      if (early) {
+        writeResponse(response, early);
+        return;
+      }
       let body = '';
-      if (request.method !== 'GET' && request.method !== 'HEAD') {
+      if (method !== 'GET' && method !== 'HEAD') {
         if (request.rawBody !== undefined) {
           body = request.rawBody.toString();
+          if (Buffer.byteLength(body) > omniconva.maxBodyBytes) {
+            writeResponse(response, new BodyTooLargeError(omniconva.maxBodyBytes).response());
+            return;
+          }
         } else if (request.readableEnded || (request.body !== undefined && typeof request.body === 'object')) {
           // A body parser already read the stream: the exact bytes are gone.
           writeResponse(response, {
@@ -87,15 +124,18 @@ export function expressMiddleware(omniconva: OmniConva) {
           });
           return;
         } else {
-          body = await readBody(request);
+          try {
+            body = await readBody(request, omniconva.maxBodyBytes);
+          } catch (error) {
+            if (error instanceof BodyTooLargeError) {
+              writeResponse(response, error.response());
+              return;
+            }
+            throw error;
+          }
         }
       }
-      const result = await omniconva.handleCall({
-        method: request.method ?? 'GET',
-        pathAndQuery,
-        body,
-        header: headerOf(request),
-      });
+      const result = await omniconva.handleCall({ method, pathAndQuery, body, header });
       if (!result) {
         next();
         return;

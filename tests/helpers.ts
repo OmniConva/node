@@ -1,4 +1,4 @@
-import { createOmniConva, signRequest, type OmniConvaOptions, type ProductInput } from '../src/index';
+import { createOmniConva, signRequest, OrderRefusedError, type OmniConvaOptions, type ProductInput } from '../src/index';
 
 export const SECRET = 'test-secret';
 export const TOKEN = 'test-token';
@@ -37,7 +37,8 @@ export function makeClient(overrides: OmniConvaOptions = {}) {
     },
     orders: {
       create(order) {
-        if (order.customer.name === 'Refuse Me') throw new Error('Out of delivery area');
+        if (order.customer.name === 'Refuse Me') throw new OrderRefusedError('Out of delivery area');
+        if (order.customer.name === 'Break Me') throw new Error('insert into orders (phone) values ("017") — connection refused 10.0.0.5:5432');
         created.push(order);
         return { orderId: `W-${1000 + created.length}`, orderNumber: 5000 + created.length };
       },
