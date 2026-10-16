@@ -282,7 +282,8 @@ To move them, pass `prefix` (or set `OMNICONVA_ROUTE_PREFIX`) and change the **R
 1. Bump `version` in `package.json` and `VERSION` in `src/version.ts`, add a CHANGELOG entry, and commit.
 2. Create a GitHub release with the tag `vX.Y.Z`.
 
-The `publish` workflow then checks that the tag matches both versions, runs the tests, and publishes to npm through trusted publishing (GitHub's OIDC identity, with provenance), so no npm token is stored anywhere.
+The `publish` workflow then checks that the tag matches both versions, runs the tests, and **stages** the version on npm through trusted publishing (GitHub's OIDC identity, with provenance), so no npm token is stored anywhere.
+3. Approve it on npm: **Staged Packages** in your npm account (or `npm stage approve <id>`), with 2FA. Only then does it go live.
 
 ## License
 

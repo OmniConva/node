@@ -1,8 +1,10 @@
 name: publish
 
-# Publishes to npm when a GitHub release is published (tag vX.Y.Z), using
-# npm trusted publishing: GitHub's OIDC identity instead of a stored token.
-# The package's npm settings trust exactly this repository and this file.
+# Stages a new npm version when a GitHub release is published (tag vX.Y.Z),
+# using npm trusted publishing: GitHub's OIDC identity instead of a stored
+# token. The package's npm settings trust exactly this repository and this
+# file, and only to stage: the version goes live once a maintainer approves
+# it under npm > Staged Packages (with 2FA), or with `npm stage approve`.
 
 on:
   release:
@@ -23,8 +25,8 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing needs npm 11.5.1 or newer.
-      - run: npm install -g npm@^11.5.1
+      # Staged publishing needs npm 12 (which needs Node 24.15 or newer).
+      - run: npm install -g npm@^12
 
       - name: Tag matches the package version
         run: |
@@ -40,5 +42,5 @@ jobs:
       - run: npm run build
 
       # No token: npm exchanges the workflow's OIDC token, and attaches a
-      # provenance statement automatically.
-      - run: npm publish --access public
+      # provenance statement automatically. Staged, not live, until approved.
+      - run: npm stage publish --access public
