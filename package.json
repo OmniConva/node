@@ -1,0 +1,61 @@
+{
+  "name": "@omniconva/node",
+  "version": "1.0.0",
+  "description": "Connect a Node.js store to OmniConva: product sync, AI chat orders and webhooks in a few lines. Express, Next.js, Hono, NestJS and plain Node.",
+  "keywords": ["omniconva", "ai", "chat", "ecommerce", "webhooks", "sales agent", "express", "nextjs"],
+  "homepage": "https://omniconva.com/docs/custom-website-api",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OmniConva/node.git"
+  },
+  "bugs": "https://github.com/OmniConva/node/issues",
+  "license": "MIT",
+  "author": "OmniConva <contact@omniconva.com> (https://omniconva.com)",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "omniconva-test": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "express": "^5.1.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
