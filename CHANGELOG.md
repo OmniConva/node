@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 — 2026-10-16
+
+- README: how releases are published (staged on npm through trusted
+  publishing, then approved with 2FA)
+- First release published from GitHub Actions, with npm provenance
+
 ## 1.0.0 — 2026-10-16
 
 First release.

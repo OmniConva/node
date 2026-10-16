@@ -1,6 +1,6 @@
 {
   "name": "@omniconva/node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Connect a Node.js store to OmniConva: product sync, AI chat orders and webhooks in a few lines. Express, Next.js, Hono, NestJS and plain Node.",
   "keywords": ["omniconva", "ai", "chat", "ecommerce", "webhooks", "sales agent", "express", "nextjs"],
   "homepage": "https://omniconva.com/docs/custom-website-api",

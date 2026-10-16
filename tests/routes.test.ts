@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { signRequest } from '../src/index';
+import { VERSION, signRequest } from '../src/index';
 import { makeClient, orderPayload, signedRequest } from './helpers';
 
 const call = async (client: ReturnType<typeof makeClient>['client'], request: Request) => {
@@ -49,7 +49,7 @@ describe('requests from OmniConva', () => {
   it('answers the health check', async () => {
     const { client } = makeClient();
     const health = await call(client, signedRequest('/omniconva/health'));
-    expect(health.body).toMatchObject({ package: '@omniconva/node', version: '1.0.0' });
+    expect(health.body).toMatchObject({ package: '@omniconva/node', version: VERSION });
     expect(health.body.framework).toMatch(/^Node\.js v/);
   });
 
