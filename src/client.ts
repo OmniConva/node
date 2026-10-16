@@ -48,6 +48,12 @@ export interface OmniConvaOptions {
   onError?: (error: unknown, context: { route: string }) => void;
   /** Override fetch (tests, proxies). */
   fetch?: typeof fetch;
+  /**
+   * Accept plain http:// for the webhook and API URLs on hosts other than
+   * localhost — a Docker Compose service name, a LAN address. Off by default:
+   * the webhook token and every payload travel over that URL.
+   */
+  allowInsecureUrls?: boolean;
 }
 
 /** A request in framework-neutral terms; the adapters build these. */
@@ -131,8 +137,11 @@ export class OmniConva {
     this.idempotency = options.idempotency ?? memoryIdempotencyStore();
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
-    if (this.webhookUrl) assertDeliveryUrl('OMNICONVA_WEBHOOK_URL', this.webhookUrl);
+    this.allowInsecureUrls = options.allowInsecureUrls ?? env('OMNICONVA_ALLOW_HTTP') === '1';
+    if (this.webhookUrl) assertDeliveryUrl('OMNICONVA_WEBHOOK_URL', this.webhookUrl, this.allowInsecureUrls);
   }
+
+  private readonly allowInsecureUrls: boolean;
 
   /** See OmniConvaOptions.maxBodyBytes. */
   readonly maxBodyBytes: number;
@@ -410,7 +419,7 @@ export class OmniConva {
     const siteKey = this.options.widget?.siteKey ?? env('OMNICONVA_SITE_KEY');
     if (!siteKey) return '';
     const apiUrl = (this.options.widget?.apiUrl ?? env('OMNICONVA_API_URL') ?? 'https://api.omniconva.com').replace(/\/+$/, '');
-    assertDeliveryUrl('OMNICONVA_API_URL', apiUrl);
+    assertDeliveryUrl('OMNICONVA_API_URL', apiUrl, this.allowInsecureUrls);
     const config: Record<string, unknown> = { siteKey, apiBase: apiUrl };
     if (options.showPoweredBy !== undefined) config.showPoweredBy = options.showPoweredBy;
     const customer = options.customer;
@@ -438,18 +447,21 @@ export class OmniConva {
 }
 
 // http:// is for your own machine only — on any other host the webhook
-// token and signed payloads would travel in clear.
-function assertDeliveryUrl(name: string, value: string): void {
+// token and signed payloads would travel in clear. `allowInsecureUrls`
+// (or OMNICONVA_ALLOW_HTTP=1) opts a private network in.
+function assertDeliveryUrl(name: string, value: string, allowInsecure = false): void {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new OmniConvaError(`${name} is not a valid URL: ${value}`);
   }
-  const local = /^(localhost|127\.0\.0\.1|\[::1\]|.+\.(localhost|test))$/i.test(url.hostname);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    throw new OmniConvaError(`${name} must start with https:// (http:// is allowed for localhost only)`);
-  }
+  if (url.protocol === 'https:') return;
+  const local = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|.+\.(localhost|test))$/i.test(url.hostname);
+  if (url.protocol === 'http:' && (local || allowInsecure)) return;
+  throw new OmniConvaError(
+    `${name} must start with https:// (http:// is allowed for localhost, or anywhere with allowInsecureUrls / OMNICONVA_ALLOW_HTTP=1)`,
+  );
 }
 
 function escapeAttribute(value: string): string {

@@ -158,8 +158,13 @@ Bun.serve({ fetch: (request) => omniconva.fetch(request) });          // Bun
 ```ts
 const handle = omniconva.node();
 http.createServer(async (req, res) => {
-  if (await handle(req, res)) return;   // answered an OmniConva route
-  // …your routes
+  try {
+    if (await handle(req, res)) return;   // answered an OmniConva route
+    // …your routes
+  } catch (error) {
+    res.statusCode = 500;
+    res.end();
+  }
 }).listen(3000);
 ```
 
@@ -268,6 +273,7 @@ To move them, pass `prefix` (or set `OMNICONVA_ROUTE_PREFIX`) and change the **R
 | `passTestOrders` | `false` |
 | `signatureTolerance` | `300` seconds |
 | `maxBodyBytes` | `1048576` (1 MB) — larger request bodies get `413` |
+| `allowInsecureUrls` | `false` — set (or `OMNICONVA_ALLOW_HTTP=1`) to accept `http://` on hosts other than localhost, e.g. a Docker service name |
 | `webhookTimeoutMs` / `webhookRetryDelaysMs` | `10000` / `[1000, 4000, 15000]` |
 | `widget` | `{ siteKey: OMNICONVA_SITE_KEY, apiUrl: OMNICONVA_API_URL, identitySecret: OMNICONVA_IDENTITY_SECRET }` |
 | `onError` | — (called with errors from your handlers) |

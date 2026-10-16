@@ -38,7 +38,7 @@ export function createOmniConva(options: OmniConvaOptions = {}): OmniConvaClient
 export { OmniConva, OmniConvaError, OrderRefusedError, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from './client';
 export type { IncomingCall, OmniConvaOptions, OutgoingResponse } from './client';
 export { fetchHandler } from './adapters/fetch';
-export { expressMiddleware, nodeHandler } from './adapters/node';
+export { expressMiddleware, nodeHandler, RequestAbortedError } from './adapters/node';
 export { parseOrder, toStandardProduct, OrderPayloadError } from './format';
 export { signRequest, signWebhook, verifyRequest, SIGNATURE_HEADER } from './signature';
 export { memoryIdempotencyStore } from './stores/memory';

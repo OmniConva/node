@@ -98,6 +98,59 @@ describe('node:http prefix', () => {
   });
 });
 
+describe('node:http robustness', () => {
+  it('survives a client that disconnects mid-body', async () => {
+    const { client } = makeClient();
+    const handle = client.node();
+    let handlerError: unknown = null;
+    const base = await listen(async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (await handle(req, res)) return;
+        res.end('mine');
+      } catch (error) {
+        handlerError = error;
+        res.end();
+      }
+    });
+    const { createConnection } = await import('node:net');
+    const url = new URL(base);
+    await new Promise<void>((resolve) => {
+      const socket = createConnection({ host: url.hostname, port: Number(url.port) }, () => {
+        socket.write(
+          `POST /omniconva/orders HTTP/1.1\r\nHost: x\r\nContent-Length: 500\r\nx-omniconva-signature: t=${Math.floor(Date.now() / 1000)},v1=deadbeef\r\n\r\n{"a":`,
+        );
+        setTimeout(() => socket.destroy(), 50);
+      });
+      socket.on('close', () => setTimeout(resolve, 50));
+    });
+    expect(handlerError).toBeNull();
+  });
+
+  it('answers 413 to an over-long chunked body', async () => {
+    const { client } = makeClient({ maxBodyBytes: 1024 });
+    const handle = client.node();
+    const base = await listen(async (req: IncomingMessage, res: ServerResponse) => {
+      if (!(await handle(req, res))) res.end('mine');
+    });
+    const path = '/omniconva/orders';
+    const big = 'x'.repeat(4096);
+    const response = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'x-omniconva-signature': signRequest('test-secret', 'POST', path, big) },
+      body: new ReadableStream({
+        start(controller) {
+          for (let i = 0; i < 4; i++) controller.enqueue(new TextEncoder().encode('x'.repeat(1024)));
+          controller.close();
+        },
+      }),
+      // @ts-expect-error -- Node's fetch needs this for a streaming body
+      duplex: 'half',
+    }).catch((error: Error) => error);
+    if (response instanceof Response) expect(response.status).toBe(413);
+    else expect(String(response)).toMatch(/aborted|socket|reset|fetch failed/i);
+  });
+});
+
 describe('Next.js', () => {
   it('exposes GET and POST route handlers', async () => {
     const { client } = makeClient();

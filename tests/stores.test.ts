@@ -40,6 +40,10 @@ describe('delivery URLs', () => {
   it('refuses a plain-http webhook URL except on localhost', () => {
     expect(() => createOmniConva({ webhookUrl: 'http://api.example.com/hook', webhookToken: 't', signingSecret: 's' })).toThrow(/https/);
     expect(() => createOmniConva({ webhookUrl: 'http://localhost:4700/hook', webhookToken: 't', signingSecret: 's' })).not.toThrow();
+    expect(() => createOmniConva({ webhookUrl: 'http://127.0.0.2:4700/hook', webhookToken: 't', signingSecret: 's' })).not.toThrow();
+    expect(() =>
+      createOmniConva({ webhookUrl: 'http://api:4700/hook', webhookToken: 't', signingSecret: 's', allowInsecureUrls: true }),
+    ).not.toThrow();
   });
 
   it('escapes the API URL in the widget script tag and refuses plain http', () => {

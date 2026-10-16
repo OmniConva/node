@@ -1,26 +1,55 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { BodyTooLargeError, type OmniConva, type OutgoingResponse } from '../client';
 
+/** The client went away before the body arrived; there is nothing to answer. */
+export class RequestAbortedError extends Error {
+  constructor() {
+    super('The request was aborted before its body arrived');
+    this.name = 'RequestAbortedError';
+  }
+}
+
 /**
  * Reads the raw body of a Node request (once), giving up as soon as it
- * passes `maxBytes` so an oversized post is dropped instead of buffered.
+ * passes `maxBytes` so an oversized post is dropped instead of buffered. A
+ * client that disconnects mid-body rejects with RequestAbortedError rather
+ * than hanging or surfacing a socket error.
  */
 export function readBody(request: IncomingMessage, maxBytes = Infinity): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let done = false;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      fn();
+    };
     request.on('data', (chunk: Buffer) => {
+      if (done) return;
       size += chunk.length;
       if (size > maxBytes) {
-        request.destroy();
-        reject(new BodyTooLargeError(maxBytes));
+        // Stop reading; the caller answers 413 and then closes the socket.
+        request.pause();
+        request.removeAllListeners('data');
+        finish(() => reject(new BodyTooLargeError(maxBytes)));
         return;
       }
       chunks.push(chunk);
     });
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    request.on('error', reject);
+    request.on('end', () => finish(() => resolve(Buffer.concat(chunks).toString('utf8'))));
+    request.on('error', () => finish(() => reject(new RequestAbortedError())));
+    request.on('aborted', () => finish(() => reject(new RequestAbortedError())));
+    request.on('close', () => finish(() => reject(new RequestAbortedError())));
   });
+}
+
+// Answers an over-long body: the 413 goes out with `connection: close`, then
+// the socket is dropped so the rest of the upload is never read.
+function refuseBody(request: IncomingMessage, response: ServerResponse, error: BodyTooLargeError): void {
+  const result = error.response();
+  response.writeHead(result.status, { ...result.headers, connection: 'close' });
+  response.end(result.body, () => request.destroy());
 }
 
 export function writeResponse(response: ServerResponse, result: OutgoingResponse): void {
@@ -59,10 +88,13 @@ export function nodeHandler(omniconva: OmniConva) {
         body = await readBody(request, omniconva.maxBodyBytes);
       } catch (error) {
         if (error instanceof BodyTooLargeError) {
-          writeResponse(response, error.response());
+          refuseBody(request, response, error);
           return true;
         }
-        throw error;
+        // The client is gone (or the socket failed): nothing to send, and
+        // nothing for the server's own handler to do either.
+        response.destroy();
+        return true;
       }
     }
     const result = await omniconva.handleCall({ method, pathAndQuery, body, header });
@@ -109,7 +141,7 @@ export function expressMiddleware(omniconva: OmniConva) {
         if (request.rawBody !== undefined) {
           body = request.rawBody.toString();
           if (Buffer.byteLength(body) > omniconva.maxBodyBytes) {
-            writeResponse(response, new BodyTooLargeError(omniconva.maxBodyBytes).response());
+            refuseBody(request, response, new BodyTooLargeError(omniconva.maxBodyBytes));
             return;
           }
         } else if (request.readableEnded || (request.body !== undefined && typeof request.body === 'object')) {
@@ -128,7 +160,11 @@ export function expressMiddleware(omniconva: OmniConva) {
             body = await readBody(request, omniconva.maxBodyBytes);
           } catch (error) {
             if (error instanceof BodyTooLargeError) {
-              writeResponse(response, error.response());
+              refuseBody(request, response, error);
+              return;
+            }
+            if (error instanceof RequestAbortedError) {
+              response.destroy();
               return;
             }
             throw error;

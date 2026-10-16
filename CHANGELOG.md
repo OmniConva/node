@@ -13,8 +13,14 @@ Security hardening, from a review of the package.
 - Only an `OrderRefusedError` thrown from `orders.create()` is relayed to
   OmniConva; any other error is answered with a generic 500 and passed to
   `onError`, so SQL text, paths and customer data stay in your logs.
-- `OMNICONVA_WEBHOOK_URL` and `OMNICONVA_API_URL` must be https (http only
-  for localhost); the widget script URL is attribute-escaped.
+- **Breaking for http setups:** `OMNICONVA_WEBHOOK_URL` and
+  `OMNICONVA_API_URL` must be https; `http://` is accepted for localhost and
+  `127.x`, and elsewhere only with `allowInsecureUrls: true` (or
+  `OMNICONVA_ALLOW_HTTP=1`) — a Docker Compose service name, for instance.
+  The widget script URL is attribute-escaped.
+- A client that disconnects while sending a body no longer surfaces as an
+  unhandled rejection from the `node:http` handler; an over-long body gets
+  its 413 before the connection is closed.
 - Idempotency stores take `{ staleClaimMs }`; the Redis store no longer
   retries without bound against a misbehaving client.
 - `npx omniconva-test --offline` no longer treats `--offline` as the URL.
