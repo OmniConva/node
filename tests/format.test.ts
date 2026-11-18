@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OrderPayloadError, parseOrder, toStandardProduct } from '../src/index';
+import { OrderPayloadError, parseOrder, pricePair, priceWarnings, toStandardProduct } from '../src/index';
 import { orderPayload } from './helpers';
 
 describe('toStandardProduct', () => {
@@ -70,4 +70,57 @@ describe('parseOrder', () => {
       expect(() => parseOrder(payload)).toThrow(OrderPayloadError);
     },
   );
+});
+
+describe('pricePair', () => {
+  it('sends the original as price and the lower one as sale_price', () => {
+    expect(pricePair({ price: 590, salePrice: 531 })).toEqual({ price: '590.00', sale_price: '531.00' });
+  });
+
+  it('reads a compare-at price as the original', () => {
+    expect(pricePair({ price: 531, compareAtPrice: 590 })).toEqual({ price: '590.00', sale_price: '531.00' });
+    // A deeper sale on top still wins.
+    expect(pricePair({ price: 531, salePrice: 500, compareAtPrice: 590 })).toEqual({
+      price: '590.00',
+      sale_price: '500.00',
+    });
+  });
+
+  it('ignores a compare-at price that is not above the price', () => {
+    expect(pricePair({ price: 590, compareAtPrice: 590 })).toEqual({ price: '590.00', sale_price: null });
+  });
+});
+
+describe('priceWarnings', () => {
+  it('says when a sale price would be ignored', () => {
+    expect(priceWarnings({ id: 52, title: 'Serum', price: 531, salePrice: 590 })).toEqual([
+      expect.stringMatching(/Product 52: salePrice 590.00 is not below price 531.00/),
+    ]);
+  });
+
+  it('says when a product is on sale but none of its variants is', () => {
+    const warnings = priceWarnings({
+      id: 13,
+      title: 'Hair Oil',
+      price: 140,
+      salePrice: 126,
+      variants: [
+        { id: 1, price: 140, options: { Size: '100ml' } },
+        { id: 2, price: 240, options: { Size: '200ml' } },
+      ],
+    });
+    expect(warnings).toEqual([expect.stringMatching(/Product 13 has a salePrice but none of its variants does/)]);
+  });
+
+  it('is quiet when the prices are right', () => {
+    expect(
+      priceWarnings({
+        id: 13,
+        title: 'Hair Oil',
+        price: 140,
+        salePrice: 126,
+        variants: [{ id: 1, price: 140, salePrice: 126, options: { Size: '100ml' } }],
+      }),
+    ).toEqual([]);
+  });
 });

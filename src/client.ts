@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { OrderPayloadError, parseOrder, toStandardProduct } from './format';
+import { OrderPayloadError, parseOrder, priceWarnings, toStandardProduct } from './format';
 import { SIGNATURE_HEADER, signWebhook, signatureLooksCurrent, verifyRequest } from './signature';
 import { memoryIdempotencyStore } from './stores/memory';
 import type { IdempotencyStore } from './stores/types';
@@ -46,6 +46,13 @@ export interface OmniConvaOptions {
   widget?: { siteKey?: string; apiUrl?: string; identitySecret?: string };
   /** Called with errors from your handlers (refused orders, failures), e.g. to log them. */
   onError?: (error: unknown, context: { route: string }) => void;
+  /**
+   * Called with advice about the products you return — a salePrice that
+   * isn't below the price, a sale that none of a product's variants has.
+   * Each message once per process. Defaults to console.warn; pass a no-op
+   * to silence it.
+   */
+  onWarning?: (message: string) => void;
   /** Override fetch (tests, proxies). */
   fetch?: typeof fetch;
   /**
@@ -142,6 +149,17 @@ export class OmniConva {
   }
 
   private readonly allowInsecureUrls: boolean;
+  private readonly warned = new Set<string>();
+
+  // The products as OmniConva reads them, with any price advice passed on.
+  private standard(product: ProductInput) {
+    for (const message of priceWarnings(product)) {
+      if (this.warned.has(message) || this.warned.size >= 1000) continue;
+      this.warned.add(message);
+      (this.options.onWarning ?? ((text: string) => console.warn(`[omniconva] ${text}`)))(message);
+    }
+    return toStandardProduct(product, this.currency);
+  }
 
   /** See OmniConvaOptions.maxBodyBytes. */
   readonly maxBodyBytes: number;
@@ -247,7 +265,7 @@ export class OmniConva {
     const hasMore =
       result.hasMore ?? (total !== null ? page * perPage < total : result.products.length >= perPage);
     return json(200, {
-      products: result.products.map((product) => toStandardProduct(product, this.currency)),
+      products: result.products.map((product) => this.standard(product)),
       page,
       per_page: perPage,
       total,
@@ -258,7 +276,7 @@ export class OmniConva {
   private async getProduct(id: string): Promise<OutgoingResponse> {
     const product = await this.requireProducts().get(id);
     return product
-      ? json(200, toStandardProduct(product, this.currency))
+      ? json(200, this.standard(product))
       : json(404, { message: 'Product not found' });
   }
 
@@ -311,7 +329,21 @@ export class OmniConva {
   /** Tells OmniConva a product changed (call it after you save one). */
   async productUpdated(product: ProductInput): Promise<void> {
     if (!this.configured()) return;
-    await this.send('product.updated', toStandardProduct(product, this.currency));
+    await this.send('product.updated', this.standard(product));
+  }
+
+  /**
+   * Tells OmniConva about many changed products — after a campaign, a sale
+   * or a price list starts or ends, when prices change without the products
+   * being edited. Sent a few at a time; resolves once all are delivered.
+   */
+  async productsUpdated(products: ProductInput[], { concurrency = 4 }: { concurrency?: number } = {}): Promise<void> {
+    if (!this.configured()) return;
+    const queue = [...products];
+    const worker = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await this.productUpdated(next);
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, worker));
   }
 
   /** Tells OmniConva a product is gone, or no longer for sale. */

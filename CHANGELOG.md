@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.0 — 2026-11-18
+
+Prices, after a shop's campaign discount never reached OmniConva.
+
+- **`compareAtPrice`** on products and variants, for shops whose `price` is
+  already the price customers pay (Shopify-style). When it is above the
+  price it is sent as the original and the price, or a lower `salePrice`,
+  as the sale.
+- **Price warnings** through the new `onWarning` option (default
+  `console.warn`, each message once per process): a `salePrice` that isn't
+  below the price and so is ignored, and a product on sale whose variants
+  have no sale price of their own (they are sold at full price).
+- **`productsUpdated(products, { concurrency })`** sends many changed
+  products at once, for prices that change without a product edit: a
+  campaign or sale starting or ending.
+- `pricePair()` and `priceWarnings()` are exported for your own checks.
+- README: a Prices section — shop-wide campaigns and automatic discounts
+  are a `salePrice`, each variant needs its own, and how to resync after a
+  campaign changes.
+
 ## 1.0.2 — 2026-10-16
 
 Security hardening, from a review of the package.
