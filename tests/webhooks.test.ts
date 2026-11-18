@@ -31,6 +31,29 @@ describe('webhooks to OmniConva', () => {
     expect(expectSigned(http.calls[0]!, 'product.updated')).toMatchObject({ id: '7', price: '300.00', stock_quantity: 4, currency: 'BDT' });
   });
 
+  it('sends many changed products, a few at a time', async () => {
+    const http = recorder();
+    const { client } = makeClient({ fetch: http.fetch });
+    await client.productsUpdated(
+      Array.from({ length: 9 }, (_, i) => ({ id: i + 1, title: `P${i + 1}`, price: 100, salePrice: 90 })),
+      { concurrency: 3 },
+    );
+    expect(http.calls).toHaveLength(9);
+    const ids = http.calls.map((call) => expectSigned(call, 'product.updated').id).sort();
+    expect(ids).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(expectSigned(http.calls[0]!, 'product.updated')).toMatchObject({ price: '100.00', sale_price: '90.00' });
+  });
+
+  it('passes price advice to onWarning, once per message', async () => {
+    const http = recorder();
+    const warnings: string[] = [];
+    const { client } = makeClient({ fetch: http.fetch, onWarning: (message) => warnings.push(message) });
+    const product = { id: 52, title: 'Serum', price: 531, salePrice: 590 };
+    await client.productUpdated(product);
+    await client.productUpdated(product);
+    expect(warnings).toEqual([expect.stringMatching(/salePrice 590.00 is not below price 531.00/)]);
+  });
+
   it('sends product.deleted and order.updated', async () => {
     const http = recorder();
     const { client } = makeClient({ fetch: http.fetch });

@@ -8,6 +8,54 @@ export function money(value: Money | unknown): string | null {
   return Number.isFinite(amount) ? amount.toFixed(2) : null;
 }
 
+/**
+ * The original and sale price OmniConva wants: `price` is the original,
+ * `sale_price` the lower one the customer pays. A `compareAtPrice` above the
+ * price makes that the original and the price (or a lower salePrice) the sale.
+ */
+export function pricePair(item: { price?: Money; salePrice?: Money; compareAtPrice?: Money }): {
+  price: string | null;
+  sale_price: string | null;
+} {
+  const price = money(item.price);
+  const sale = money(item.salePrice);
+  const compareAt = money(item.compareAtPrice);
+  if (compareAt !== null && price !== null && Number(compareAt) > Number(price)) {
+    const current = sale !== null && Number(sale) < Number(price) ? sale : price;
+    return { price: compareAt, sale_price: current };
+  }
+  return { price, sale_price: sale };
+}
+
+const onSale = (pair: { price: string | null; sale_price: string | null }) =>
+  pair.price !== null && pair.sale_price !== null && Number(pair.sale_price) < Number(pair.price);
+
+/**
+ * What OmniConva would ignore or misread in a product's prices, in words a
+ * developer can act on. The products still sync; this is only advice.
+ */
+export function priceWarnings(product: ProductInput): string[] {
+  const warnings: string[] = [];
+  const name = `Product ${String(product.id)}`;
+  const check = (label: string, pair: { price: string | null; sale_price: string | null }) => {
+    if (pair.sale_price !== null && pair.price !== null && !onSale(pair)) {
+      warnings.push(
+        `${label}: salePrice ${pair.sale_price} is not below price ${pair.price}, so OmniConva ignores it. Send the original as price and the lower one as salePrice (or use compareAtPrice).`,
+      );
+    }
+  };
+  const own = pricePair(product);
+  check(name, own);
+  const variants = product.variants ?? [];
+  for (const variant of variants) check(`${name} variant ${String(variant.id)}`, pricePair(variant));
+  if (onSale(own) && variants.length > 0 && !variants.some((variant) => onSale(pricePair(variant)))) {
+    warnings.push(
+      `${name} has a salePrice but none of its variants does, so they are sold at full price. Give each variant its own salePrice.`,
+    );
+  }
+  return warnings;
+}
+
 function strings(values: (string | null | undefined)[] | undefined): string[] {
   const out: string[] = [];
   for (const value of values ?? []) {
@@ -37,8 +85,7 @@ function variantToStandard(variant: VariantInput) {
     id: String(variant.id),
     title: variant.title ?? (Object.keys(options).length ? Object.values(options).join(' / ') : null),
     sku: variant.sku ?? null,
-    price: money(variant.price),
-    sale_price: money(variant.salePrice),
+    ...pricePair(variant),
     in_stock: inStock(variant.inStock, variant.stockQuantity),
     stock_quantity: variant.stockQuantity ?? null,
     image: variant.image ?? null,
@@ -70,8 +117,7 @@ export function toStandardProduct(product: ProductInput, defaultCurrency: string
     tags: strings(product.tags),
     images: strings(product.images),
     currency: product.currency ?? defaultCurrency,
-    price: money(product.price),
-    sale_price: money(product.salePrice),
+    ...pricePair(product),
     in_stock: inStock(product.inStock, product.stockQuantity),
     stock_quantity: product.stockQuantity ?? null,
     options: [...options].map(([name, values]) => ({ name, values })),

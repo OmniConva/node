@@ -86,14 +86,15 @@ function toOmniConva(product: ProductWithVariants) {
     title: product.name,
     url: `https://yourshop.com/products/${product.slug}`,
     description: product.description,
-    price: product.price,
-    salePrice: product.salePrice,        // only counts when below the price
+    price: product.price,                // the original price
+    salePrice: product.salePrice,        // what customers pay now, when lower (see Prices below)
     stockQuantity: product.stock,        // or inStock: true if you don't count stock
     images: [product.imageUrl],
     categories: [product.category],
     variants: product.variants.map((variant) => ({
       id: variant.id,
       price: variant.price,
+      salePrice: variant.salePrice,      // variants need their own; the product's doesn't carry over
       stockQuantity: variant.stock,
       options: { Size: variant.size },
     })),
@@ -101,6 +102,13 @@ function toOmniConva(product: ProductWithVariants) {
   };
 }
 ```
+
+**Prices:**
+- `price` is the original price and `salePrice` the lower price customers pay now. A `salePrice` that isn't below `price` is ignored.
+- **Discounts your shop applies on its own count too.** A shop-wide campaign, an automatic coupon or a member price is a `salePrice`, worked out the same way your storefront does. If the storefront shows "10% OFF" but your product's own sale field is empty, send the campaign price: `salePrice: campaign?.price ?? product.salePrice`. Taking the lower of the two is safer when both can apply.
+- **Each variant needs its own `salePrice`.** A product's sale price does not apply to its variants, so a sized or coloured product with a sale only on the parent is sold at full price.
+- **Shopify-style prices?** If your `price` is already the price customers pay and the original is a "compare at" price, pass `compareAtPrice` instead: `{ price: 531, compareAtPrice: 590 }` is sent as 590 crossed out and 531.
+- When a price would be ignored, or a product is on sale but none of its variants is, the package logs a warning (once each) through `onWarning`, which defaults to `console.warn`.
 
 **Keep these rules in mind:**
 - Ids must never change. A variant's id only has to be unique within its product.
@@ -175,6 +183,12 @@ Call these after your own writes:
 ```ts
 await omniconva.productUpdated(toOmniConva(product));   // created or changed
 await omniconva.productDeleted(product.id);             // deleted, or no longer for sale
+```
+
+**Prices that change without a product edit** — a campaign or sale starting or ending, a new price list — need telling too, or OmniConva keeps the old prices until the next sync. Send every affected product at once:
+
+```ts
+await omniconva.productsUpdated(affectedProducts.map(toOmniConva));   // a few at a time
 ```
 
 Webhooks are signed. Network errors, 5xx and 429 are retried with backoff (1s, 4s, 15s) before the promise rejects. If you need them to survive a restart, call these from your job queue (BullMQ etc.).
@@ -277,6 +291,7 @@ To move them, pass `prefix` (or set `OMNICONVA_ROUTE_PREFIX`) and change the **R
 | `webhookTimeoutMs` / `webhookRetryDelaysMs` | `10000` / `[1000, 4000, 15000]` |
 | `widget` | `{ siteKey: OMNICONVA_SITE_KEY, apiUrl: OMNICONVA_API_URL, identitySecret: OMNICONVA_IDENTITY_SECRET }` |
 | `onError` | — (called with errors from your handlers) |
+| `onWarning` | `console.warn` (price advice about the products you return, each message once) |
 
 ## How it's secured
 

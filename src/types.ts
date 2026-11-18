@@ -7,9 +7,20 @@ export interface VariantInput {
   id: string | number;
   title?: string | null;
   sku?: string | null;
+  /** The original price. */
   price?: Money;
-  /** Only counts when below the price. */
+  /**
+   * What the customer pays now — a sale, or a campaign or coupon your shop
+   * applies automatically. Only counts when below the price. Each variant
+   * needs its own: a product's salePrice does not apply to its variants.
+   */
   salePrice?: Money;
+  /**
+   * For shops whose `price` is already the price customers pay and the
+   * original is kept as a "compare at" / "was" price (Shopify-style). When it
+   * is above `price`, it is sent as the original and `price` as the sale.
+   */
+  compareAtPrice?: Money;
   inStock?: boolean | null;
   /** Null when you don't count stock; `inStock` then says in or out. */
   stockQuantity?: number | null;
@@ -34,8 +45,16 @@ export interface ProductInput {
   /** Absolute http(s) URLs. */
   images?: (string | null | undefined)[];
   currency?: string | null;
+  /** The original price. */
   price?: Money;
+  /**
+   * What the customer pays now, when lower: a sale, or a campaign or coupon
+   * your shop applies automatically (a "10% off" campaign is a salePrice of
+   * 90% of the price). Give variants their own.
+   */
   salePrice?: Money;
+  /** See VariantInput.compareAtPrice. */
+  compareAtPrice?: Money;
   inStock?: boolean | null;
   stockQuantity?: number | null;
   variants?: VariantInput[];
